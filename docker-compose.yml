@@ -1,0 +1,67 @@
+services:
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    entrypoint: >
+      /bin/sh -c "until mc alias set weatheriq http://minio:9000 $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY; do sleep 2; done; mc mb --ignore-existing weatheriq/$$MINIO_BUCKET"
+
+  api:
+    build: .
+    command: python -m uvicorn api:app --host 0.0.0.0 --port 8000
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      SPARK_LOCAL_DIR: /tmp/spark
+    ports:
+      - "8000:8000"
+    depends_on:
+      - minio-init
+
+  dashboard:
+    build: .
+    command: python -m streamlit run dashboard.py --server.address 0.0.0.0 --server.port 8501
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    ports:
+      - "8501:8501"
+    depends_on:
+      - minio-init
+
+  pipeline:
+    build: .
+    command: /bin/sh -c "python ingest_weather.py && python bronze_to_silver.py && python silver_to_gold.py"
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      SPARK_LOCAL_DIR: /tmp/spark
+    depends_on:
+      - minio-init
+    profiles:
+      - pipeline
+
+volumes:
+  minio-data:

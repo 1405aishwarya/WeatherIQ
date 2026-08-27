@@ -1,0 +1,12 @@
+boto3
+fastapi
+pandas
+pyarrow
+pyspark
+python-dotenv
+requests
+scikit-learn
+s3fs
+statsmodels
+streamlit
+uvicorn[standard]
